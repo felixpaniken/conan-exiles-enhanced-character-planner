@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Claude Code per-user settings (launch.json stays tracked)
+.claude/settings.local.json
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Future Node deps
+node_modules/

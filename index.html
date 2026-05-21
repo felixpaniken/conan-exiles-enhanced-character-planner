@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a1410" />
+  <title>Conan Exiles Character Planner</title>
+  <link rel="stylesheet" href="styles.css?v=8" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <h1>Character Planner</h1>
+      <div class="ap-counter" aria-live="polite">
+        <span id="ap-spent">0</span><span class="ap-sep">/</span><span class="ap-max">60</span>
+        <span class="ap-label">points</span>
+      </div>
+      <div class="header-actions">
+        <button id="share-btn" type="button" class="header-btn" aria-label="Copy shareable link">Share</button>
+        <button id="reset-btn" type="button" class="header-btn" aria-label="Reset all points">Reset</button>
+      </div>
+    </div>
+  </header>
+
+  <section id="stats-panel" class="stats-panel" aria-label="Build stats summary"></section>
+
+  <main id="attributes" class="attributes-grid"></main>
+
+  <footer class="app-footer">
+    <p>Data from the <a href="https://conanexiles.fandom.com/wiki/Attribute" target="_blank" rel="noopener">Conan Exiles wiki</a>. Build is saved in this browser.</p>
+  </footer>
+
+  <script src="icons.js?v=8"></script>
+  <script src="data.js?v=8"></script>
+  <script src="app.js?v=8"></script>
+</body>
+</html>
