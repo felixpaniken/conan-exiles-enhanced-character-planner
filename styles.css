@@ -109,14 +109,8 @@ body {
 
 .bi-icon-svg { width: 22px; height: 22px; }
 
-.build-identity-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
 .build-name {
+  min-width: 0;
   font-size: 20px;
   font-weight: 700;
   line-height: 1.15;
@@ -124,24 +118,6 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.build-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-mute);
-}
-
-.build-status.dirty { color: var(--accent); }
-
-.build-status.dirty::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
 }
 
 .header-controls { display: contents; }
@@ -185,7 +161,6 @@ body {
   gap: 8px;
 }
 
-.header-actions #save-btn,
 .header-actions #share-btn { flex: 1 1 0; min-width: 0; }
 
 .header-btn {
@@ -208,18 +183,6 @@ body {
 
 .header-btn:active { background: var(--bg-elev-2); }
 .header-btn.copied { color: var(--accent); border-color: var(--accent); }
-
-.header-btn.primary {
-  background: var(--accent);
-  color: #1a1410;
-  border-color: var(--accent);
-  font-weight: 600;
-}
-
-.header-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
 
 .btn-icon { width: 15px; height: 15px; }
 
@@ -280,7 +243,6 @@ body {
     justify-self: end;
   }
   .ap-counter, .header-actions { grid-area: auto; }
-  .header-actions #save-btn,
   .header-actions #share-btn { flex: 0 0 auto; }
   .tab-bar { justify-self: center; }
   .tab { flex: 0 0 auto; }

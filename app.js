@@ -43,8 +43,6 @@
   function cloneState(s) { return sanitizeState(JSON.parse(JSON.stringify(s))); }
   function newId() { return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function currentBuild() { return builds.find((b) => b.id === currentId) || builds[0]; }
-  function statesEqual(a, b) { return encodeState(a) === encodeState(b); }
-  function isDirty() { const b = currentBuild(); return b ? !statesEqual(state, b.state) : false; }
   function stateTotal(s) { return ATTRIBUTES.reduce((n, a) => n + s[a.id].points, 0); }
   function totalSpent() { return stateTotal(state); }
 
@@ -97,15 +95,22 @@
   }
 
   // ----- Persistence -----
+  // Auto-save: every edit writes straight into the current build, so there is no
+  // separate "draft" or dirty state to manage.
 
   function persist() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ builds, currentId, draft: state }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ builds, currentId }));
     } catch (e) {}
   }
 
-  // Called after every edit to the working state.
+  // Called after every edit — commit the working state into the current build.
   function saveState() {
+    const b = currentBuild();
+    if (b) {
+      b.state = cloneState(state);
+      b.updatedAt = Date.now();
+    }
     persist();
     updateHash();
   }
@@ -113,6 +118,7 @@
   function loadStore() {
     let store = null;
     try { store = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) {}
+    const fromHash = loadFromHash();
 
     if (store && Array.isArray(store.builds) && store.builds.length) {
       builds = store.builds.map((b) => ({
@@ -122,25 +128,31 @@
         updatedAt: b.updatedAt || Date.now(),
       }));
       currentId = builds.some((b) => b.id === store.currentId) ? store.currentId : builds[0].id;
-      state = store.draft ? sanitizeState(store.draft) : cloneState(currentBuild().state);
+      // Carry over any unsaved draft left by the previous (manual-save) version.
+      if (store.draft) currentBuild().state = sanitizeState(store.draft);
+      // A shared link different from the current build is imported as a new build,
+      // so opening a link never overwrites an existing build.
+      if (fromHash && encodeState(fromHash) !== encodeState(currentBuild().state)) {
+        const b = { id: newId(), name: uniqueName('Imported build'), state: fromHash, updatedAt: Date.now() };
+        builds.unshift(b);
+        currentId = b.id;
+      }
     } else {
-      // Migrate a legacy single build if present.
+      // First run — migrate a legacy single build, or seed from a shared link.
       let legacy = null;
       try { legacy = JSON.parse(localStorage.getItem(LEGACY_KEY) || 'null'); } catch (e) {}
       const first = {
         id: newId(),
-        name: legacy ? 'My Build' : 'Untitled',
-        state: sanitizeState(legacy),
+        name: fromHash ? 'Imported build' : (legacy ? 'My Build' : 'Untitled'),
+        state: fromHash || sanitizeState(legacy),
         updatedAt: Date.now(),
       };
       builds = [first];
       currentId = first.id;
-      state = cloneState(first.state);
     }
 
-    // A shared URL hash overrides the working state.
-    const fromHash = loadFromHash();
-    if (fromHash) state = fromHash;
+    state = cloneState(currentBuild().state);
+    persist();
   }
 
   loadStore();
@@ -155,47 +167,28 @@
     return base + ' ' + n;
   }
 
-  function confirmDiscard() {
-    return !isDirty() || confirm('Discard unsaved changes to "' + currentBuild().name + '"?');
-  }
-
-  function saveCurrentBuild() {
-    const b = currentBuild();
-    if (!b || !isDirty()) return;
-    b.state = cloneState(state);
-    b.updatedAt = Date.now();
+  // Persist build-list / selection changes without bumping the build's edit time.
+  function persistNav() {
     persist();
-    render();
+    updateHash();
   }
 
   function switchBuild(id) {
-    if (id === currentId) { closeSheet(); return; }
-    if (!confirmDiscard()) return;
-    currentId = id;
-    state = cloneState(currentBuild().state);
-    saveState();
+    if (id !== currentId) {
+      currentId = id;
+      state = cloneState(currentBuild().state);
+      persistNav();
+      render();
+    }
     closeSheet();
-    render();
   }
 
   function newBuild() {
-    if (!confirmDiscard()) return;
     const b = { id: newId(), name: uniqueName('New build'), state: defaultState(), updatedAt: Date.now() };
     builds.unshift(b);
     currentId = b.id;
     state = cloneState(b.state);
-    saveState();
-    closeSheet();
-    render();
-  }
-
-  function saveAsNew() {
-    const name = (prompt('Name this build:', currentBuild().name) || '').trim();
-    if (!name) return;
-    const b = { id: newId(), name: uniqueName(name), state: cloneState(state), updatedAt: Date.now() };
-    builds.unshift(b);
-    currentId = b.id;
-    persist();
+    persistNav();
     closeSheet();
     render();
   }
@@ -233,7 +226,7 @@
       currentId = builds[0].id;
       state = cloneState(currentBuild().state);
     }
-    saveState();
+    persistNav();
     render();
   }
 
@@ -248,7 +241,7 @@
     builds.unshift(b);
     currentId = b.id;
     state = cloneState(b.state);
-    saveState();
+    persistNav();
     closeSheet();
     render();
   }
@@ -424,8 +417,6 @@
   const buildIdentityBtn = document.getElementById('build-identity');
   const biIcon = document.getElementById('bi-icon');
   const biName = document.getElementById('bi-name');
-  const biStatus = document.getElementById('bi-status');
-  const saveBtn = document.getElementById('save-btn');
   const buildsSheet = document.getElementById('builds-sheet');
   const sheetScrim = document.getElementById('sheet-scrim');
 
@@ -477,14 +468,9 @@
 
   function renderHeaderBuild() {
     const b = currentBuild();
-    const dirty = isDirty();
     const dom = dominantAttr(state);
     biIcon.replaceChildren(icon(dom ? dom.icon : 'user', 'bi-icon-svg'));
     biName.textContent = b ? b.name : 'Untitled';
-    biStatus.textContent = dirty ? 'Unsaved changes' : 'Saved';
-    biStatus.classList.toggle('dirty', dirty);
-    saveBtn.disabled = !dirty;
-    saveBtn.classList.toggle('primary', dirty);
   }
 
   // ----- Builds sheet -----
@@ -549,8 +535,7 @@
     iconTile.append(icon(dom ? dom.icon : 'user', 'build-card-icon-svg'));
 
     const total = stateTotal(cardState);
-    const meta = total + 'pt · ' + relativeTime(b.updatedAt)
-      + (isCurrent && isDirty() ? ' · unsaved' : '');
+    const meta = total + 'pt · ' + relativeTime(b.updatedAt);
 
     const body = el('div', { class: 'build-card-body' },
       el('div', { class: 'build-card-row' },
@@ -597,13 +582,10 @@
     const newBtn = el('button', { class: 'sheet-btn primary', type: 'button' });
     newBtn.append(icon('plus', 'sheet-btn-icon'), el('span', {}, 'New build'));
     newBtn.addEventListener('click', newBuild);
-    const saveAsBtn = el('button', { class: 'sheet-btn', type: 'button' });
-    saveAsBtn.append(icon('copy', 'sheet-btn-icon'), el('span', {}, 'Save current as…'));
-    saveAsBtn.addEventListener('click', saveAsNew);
     const importBtn = el('button', { class: 'sheet-btn', type: 'button' });
     importBtn.append(icon('share', 'sheet-btn-icon'), el('span', {}, 'Import from link'));
     importBtn.addEventListener('click', importFromLink);
-    footer.append(newBtn, saveAsBtn, importBtn);
+    footer.append(newBtn, importBtn);
 
     buildsSheet.replaceChildren(
       el('div', { class: 'sheet-handle' }),
@@ -916,11 +898,8 @@
   const shareBtn = document.getElementById('share-btn');
   const resetBtn = document.getElementById('reset-btn');
   const shareLabel = el('span', { class: 'btn-label' }, 'Share');
-  saveBtn.replaceChildren(icon('save', 'btn-icon'), el('span', { class: 'btn-label' }, 'Save'));
   shareBtn.replaceChildren(icon('share', 'btn-icon'), shareLabel);
   resetBtn.replaceChildren(icon('rotate-ccw', 'btn-icon'), el('span', { class: 'btn-label' }, 'Reset'));
-
-  saveBtn.addEventListener('click', saveCurrentBuild);
 
   buildIdentityBtn.addEventListener('click', () => {
     sheetOpen ? closeSheet() : openSheet();
@@ -966,11 +945,13 @@
 
   window.addEventListener('hashchange', () => {
     const next = loadFromHash();
-    if (!next || encodeState(next) === encodeState(state)) return;
-    suppressHashUpdate = true;
-    state = next;
-    suppressHashUpdate = false;
-    saveState();
+    if (!next || encodeState(next) === encodeState(currentBuild().state)) return;
+    // An externally-changed hash is imported as a new build, never overwriting one.
+    const b = { id: newId(), name: uniqueName('Imported build'), state: next, updatedAt: Date.now() };
+    builds.unshift(b);
+    currentId = b.id;
+    state = cloneState(b.state);
+    persistNav();
     render();
   });
 
