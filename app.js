@@ -1,7 +1,8 @@
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'cep-build-v2';
+  const STORAGE_KEY = 'cep-builds-v1';
+  const LEGACY_KEY = 'cep-build-v2';
 
   // Base character stats (level 1, no attributes).
   const BASE = {
@@ -13,62 +14,58 @@
   };
 
   // ----- State -----
-  // { [attrId]: { points, corruptedPoints, choices: { [tier]: choiceIndex } } }
-  const state = loadFromHash() || loadState();
+  // A build: { id, name, state, updatedAt }
+  // state: { [attrId]: { points, corruptedPoints, choices: { [tier]: index } } }
+  let builds = [];
+  let currentId = null;
+  let state;                  // live working state — may differ from the saved build (dirty)
+  let suppressHashUpdate = false;
 
   function defaultState() {
     const s = {};
-    for (const a of ATTRIBUTES) {
-      s[a.id] = { points: 0, corruptedPoints: 0, choices: {} };
-    }
+    for (const a of ATTRIBUTES) s[a.id] = { points: 0, corruptedPoints: 0, choices: {} };
     return s;
   }
 
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return defaultState();
-      const parsed = JSON.parse(raw);
-      const base = defaultState();
-      for (const id of Object.keys(base)) {
-        if (parsed[id]) {
-          base[id].points = Math.max(0, Math.min(MAX_PER_ATTR, parsed[id].points | 0));
-          base[id].corruptedPoints = Math.max(0, Math.min(base[id].points, parsed[id].corruptedPoints | 0));
-          base[id].choices = parsed[id].choices && typeof parsed[id].choices === 'object' ? parsed[id].choices : {};
-        }
-      }
-      return base;
-    } catch (e) {
-      return defaultState();
+  function sanitizeState(parsed) {
+    const base = defaultState();
+    if (!parsed || typeof parsed !== 'object') return base;
+    for (const id of Object.keys(base)) {
+      const p = parsed[id];
+      if (!p) continue;
+      base[id].points = Math.max(0, Math.min(MAX_PER_ATTR, p.points | 0));
+      base[id].corruptedPoints = Math.max(0, Math.min(base[id].points, p.corruptedPoints | 0));
+      base[id].choices = p.choices && typeof p.choices === 'object' ? { ...p.choices } : {};
     }
+    return base;
   }
 
-  function saveState() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (e) {}
-    updateHash();
-  }
+  function cloneState(s) { return sanitizeState(JSON.parse(JSON.stringify(s))); }
+  function newId() { return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  function currentBuild() { return builds.find((b) => b.id === currentId) || builds[0]; }
+  function statesEqual(a, b) { return encodeState(a) === encodeState(b); }
+  function isDirty() { const b = currentBuild(); return b ? !statesEqual(state, b.state) : false; }
+  function stateTotal(s) { return ATTRIBUTES.reduce((n, a) => n + s[a.id].points, 0); }
+  function totalSpent() { return stateTotal(state); }
 
   // ----- Hash encoding -----
-  // Per-attribute slug: "<points>.<corrupted>.<t10>.<t20>" with "_" = unset.
-  // Joined by "-" in ATTRIBUTES order.
+  // Per-attribute slug: "<points>.<corrupted>.<t10>.<t20>" ("_" = unset). Joined by "-".
 
-  function encodeHash() {
+  function encodeState(s) {
     return ATTRIBUTES.map((a) => {
-      const s = state[a.id];
-      const t10 = s.choices[10];
-      const t20 = s.choices[20];
+      const x = s[a.id];
+      const t10 = x.choices[10];
+      const t20 = x.choices[20];
       return [
-        s.points,
-        a.corruptable ? s.corruptedPoints : 0,
+        x.points,
+        a.corruptable ? x.corruptedPoints : 0,
         t10 == null ? '_' : t10,
         t20 == null ? '_' : t20,
       ].join('.');
     }).join('-');
   }
 
-  function decodeHash(hash) {
+  function decodeState(hash) {
     if (!hash) return null;
     const parts = hash.split('-');
     if (parts.length !== ATTRIBUTES.length) return null;
@@ -80,9 +77,8 @@
       const points = Math.max(0, Math.min(MAX_PER_ATTR, parseInt(bits[0], 10) || 0));
       const corrupted = a.corruptable ? Math.max(0, Math.min(points, parseInt(bits[1], 10) || 0)) : 0;
       const choices = {};
-      const t10 = bits[2], t20 = bits[3];
-      if (t10 !== '_' && points >= 10) choices[10] = Math.max(0, Math.min(1, parseInt(t10, 10) || 0));
-      if (t20 !== '_' && points >= 20) choices[20] = Math.max(0, Math.min(1, parseInt(t20, 10) || 0));
+      if (bits[2] !== '_' && points >= 10) choices[10] = Math.max(0, Math.min(1, parseInt(bits[2], 10) || 0));
+      if (bits[3] !== '_' && points >= 20) choices[20] = Math.max(0, Math.min(1, parseInt(bits[3], 10) || 0));
       result[a.id] = { points, corruptedPoints: corrupted, choices };
     }
     return result;
@@ -90,20 +86,198 @@
 
   function loadFromHash() {
     const raw = location.hash.replace(/^#/, '');
-    if (!raw) return null;
-    return decodeHash(raw);
+    return raw ? decodeState(raw) : null;
   }
 
-  let suppressHashUpdate = false;
   function updateHash() {
     if (suppressHashUpdate) return;
-    const encoded = encodeHash();
+    const encoded = encodeState(state);
     if (encoded === location.hash.replace(/^#/, '')) return;
     history.replaceState(null, '', '#' + encoded);
   }
 
-  function totalSpent() {
-    return ATTRIBUTES.reduce((sum, a) => sum + state[a.id].points, 0);
+  // ----- Persistence -----
+
+  function persist() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ builds, currentId, draft: state }));
+    } catch (e) {}
+  }
+
+  // Called after every edit to the working state.
+  function saveState() {
+    persist();
+    updateHash();
+  }
+
+  function loadStore() {
+    let store = null;
+    try { store = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) {}
+
+    if (store && Array.isArray(store.builds) && store.builds.length) {
+      builds = store.builds.map((b) => ({
+        id: b.id || newId(),
+        name: (typeof b.name === 'string' && b.name.trim()) ? b.name.trim() : 'Untitled',
+        state: sanitizeState(b.state),
+        updatedAt: b.updatedAt || Date.now(),
+      }));
+      currentId = builds.some((b) => b.id === store.currentId) ? store.currentId : builds[0].id;
+      state = store.draft ? sanitizeState(store.draft) : cloneState(currentBuild().state);
+    } else {
+      // Migrate a legacy single build if present.
+      let legacy = null;
+      try { legacy = JSON.parse(localStorage.getItem(LEGACY_KEY) || 'null'); } catch (e) {}
+      const first = {
+        id: newId(),
+        name: legacy ? 'My Build' : 'Untitled',
+        state: sanitizeState(legacy),
+        updatedAt: Date.now(),
+      };
+      builds = [first];
+      currentId = first.id;
+      state = cloneState(first.state);
+    }
+
+    // A shared URL hash overrides the working state.
+    const fromHash = loadFromHash();
+    if (fromHash) state = fromHash;
+  }
+
+  loadStore();
+
+  // ----- Build operations -----
+
+  function uniqueName(base) {
+    const taken = new Set(builds.map((b) => b.name));
+    if (!taken.has(base)) return base;
+    let n = 2;
+    while (taken.has(base + ' ' + n)) n++;
+    return base + ' ' + n;
+  }
+
+  function confirmDiscard() {
+    return !isDirty() || confirm('Discard unsaved changes to "' + currentBuild().name + '"?');
+  }
+
+  function saveCurrentBuild() {
+    const b = currentBuild();
+    if (!b || !isDirty()) return;
+    b.state = cloneState(state);
+    b.updatedAt = Date.now();
+    persist();
+    render();
+  }
+
+  function switchBuild(id) {
+    if (id === currentId) { closeSheet(); return; }
+    if (!confirmDiscard()) return;
+    currentId = id;
+    state = cloneState(currentBuild().state);
+    saveState();
+    closeSheet();
+    render();
+  }
+
+  function newBuild() {
+    if (!confirmDiscard()) return;
+    const b = { id: newId(), name: uniqueName('New build'), state: defaultState(), updatedAt: Date.now() };
+    builds.unshift(b);
+    currentId = b.id;
+    state = cloneState(b.state);
+    saveState();
+    closeSheet();
+    render();
+  }
+
+  function saveAsNew() {
+    const name = (prompt('Name this build:', currentBuild().name) || '').trim();
+    if (!name) return;
+    const b = { id: newId(), name: uniqueName(name), state: cloneState(state), updatedAt: Date.now() };
+    builds.unshift(b);
+    currentId = b.id;
+    persist();
+    closeSheet();
+    render();
+  }
+
+  function renameBuild(id) {
+    const b = builds.find((x) => x.id === id);
+    if (!b) return;
+    const name = (prompt('Rename build:', b.name) || '').trim();
+    if (!name) return;
+    b.name = name;
+    persist();
+    render();
+  }
+
+  function duplicateBuild(id) {
+    const b = builds.find((x) => x.id === id);
+    if (!b) return;
+    const copy = { id: newId(), name: uniqueName(b.name + ' copy'), state: cloneState(b.state), updatedAt: Date.now() };
+    builds.splice(builds.indexOf(b) + 1, 0, copy);
+    persist();
+    render();
+  }
+
+  function deleteBuild(id) {
+    const b = builds.find((x) => x.id === id);
+    if (!b) return;
+    if (!confirm('Delete "' + b.name + '"? This cannot be undone.')) return;
+    builds = builds.filter((x) => x.id !== id);
+    if (!builds.length) {
+      const fresh = { id: newId(), name: 'Untitled', state: defaultState(), updatedAt: Date.now() };
+      builds = [fresh];
+      currentId = fresh.id;
+      state = cloneState(fresh.state);
+    } else if (currentId === id) {
+      currentId = builds[0].id;
+      state = cloneState(currentBuild().state);
+    }
+    saveState();
+    render();
+  }
+
+  function importFromLink() {
+    const input = (prompt('Paste a build link or code:') || '').trim();
+    if (!input) return;
+    const hashIdx = input.indexOf('#');
+    const code = hashIdx >= 0 ? input.slice(hashIdx + 1) : input;
+    const imported = decodeState(code);
+    if (!imported) { alert("That doesn't look like a valid build link."); return; }
+    const b = { id: newId(), name: uniqueName('Imported build'), state: imported, updatedAt: Date.now() };
+    builds.unshift(b);
+    currentId = b.id;
+    state = cloneState(b.state);
+    saveState();
+    closeSheet();
+    render();
+  }
+
+  // ----- Build display helpers -----
+
+  function relativeTime(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 45) return 'just now';
+    const m = Math.round(s / 60);
+    if (m < 60) return m + 'm ago';
+    const h = Math.round(m / 60);
+    if (h < 24) return h + 'h ago';
+    const d = Math.round(h / 24);
+    if (d < 7) return d + 'd ago';
+    const w = Math.round(d / 7);
+    if (w < 5) return w + 'w ago';
+    const mo = Math.round(d / 30);
+    if (mo < 12) return mo + 'mo ago';
+    return Math.round(d / 365) + 'y ago';
+  }
+
+  function dominantAttr(s) {
+    let best = null;
+    let bestPts = 0;
+    for (const a of ATTRIBUTES) {
+      if (s[a.id].points > bestPts) { bestPts = s[a.id].points; best = a; }
+    }
+    return best;
   }
 
   // ----- Stats computation -----
@@ -247,6 +421,13 @@
   const tabBar = document.getElementById('tab-bar');
   const apSpentEl = document.getElementById('ap-spent');
   const apCounterEl = document.querySelector('.ap-counter');
+  const buildIdentityBtn = document.getElementById('build-identity');
+  const biIcon = document.getElementById('bi-icon');
+  const biName = document.getElementById('bi-name');
+  const biStatus = document.getElementById('bi-status');
+  const saveBtn = document.getElementById('save-btn');
+  const buildsSheet = document.getElementById('builds-sheet');
+  const sheetScrim = document.getElementById('sheet-scrim');
 
   const TABS = [
     { id: 'overview', label: 'Overview', icon: 'user' },
@@ -286,10 +467,185 @@
   function render() {
     renderTabs();
     applyTabVisibility();
+    renderHeaderBuild();
     grid.replaceChildren(...ATTRIBUTES.map(renderAttribute));
     overviewPanel.replaceChildren(...renderOverview());
     apSpentEl.textContent = totalSpent();
     apCounterEl.classList.toggle('over', totalSpent() > MAX_AP);
+    if (sheetOpen) renderSheet();
+  }
+
+  function renderHeaderBuild() {
+    const b = currentBuild();
+    const dirty = isDirty();
+    const dom = dominantAttr(state);
+    biIcon.replaceChildren(icon(dom ? dom.icon : 'user', 'bi-icon-svg'));
+    biName.textContent = b ? b.name : 'Untitled';
+    biStatus.textContent = dirty ? 'Unsaved changes' : 'Saved';
+    biStatus.classList.toggle('dirty', dirty);
+    saveBtn.disabled = !dirty;
+    saveBtn.classList.toggle('primary', dirty);
+  }
+
+  // ----- Builds sheet -----
+
+  let sheetOpen = false;
+
+  function openSheet() {
+    sheetOpen = true;
+    renderSheet();
+    buildsSheet.classList.add('open');
+    sheetScrim.classList.add('open');
+    document.body.classList.add('sheet-locked');
+    positionSheet();
+  }
+
+  function closeSheet() {
+    sheetOpen = false;
+    closeCardMenu();
+    buildsSheet.classList.remove('open');
+    sheetScrim.classList.remove('open');
+    document.body.classList.remove('sheet-locked');
+  }
+
+  function positionSheet() {
+    // Desktop: popover anchored under the build identity. Mobile: CSS bottom sheet.
+    if (window.innerWidth >= 860) {
+      const r = buildIdentityBtn.getBoundingClientRect();
+      buildsSheet.style.top = (r.bottom + 8) + 'px';
+      buildsSheet.style.left = r.left + 'px';
+    } else {
+      buildsSheet.style.top = '';
+      buildsSheet.style.left = '';
+    }
+  }
+
+  function distBar(s) {
+    const bar = el('div', { class: 'dist-bar' });
+    if (!stateTotal(s)) {
+      bar.classList.add('empty');
+      return bar;
+    }
+    for (const a of ATTRIBUTES) {
+      const pts = s[a.id].points;
+      if (!pts) continue;
+      const seg = el('div', { class: 'dist-seg' });
+      seg.style.flexGrow = String(pts);
+      seg.style.background = a.color;
+      bar.append(seg);
+    }
+    return bar;
+  }
+
+  function buildCard(b, isCurrent) {
+    const cardState = isCurrent ? state : b.state;
+    const dom = dominantAttr(cardState);
+    const card = el('div', { class: 'build-card' + (isCurrent ? ' current' : '') });
+
+    const hit = el('button', { class: 'build-card-hit', type: 'button', 'aria-label': 'Open ' + b.name });
+    hit.addEventListener('click', () => switchBuild(b.id));
+
+    const iconTile = el('div', { class: 'build-card-icon' });
+    iconTile.append(icon(dom ? dom.icon : 'user', 'build-card-icon-svg'));
+
+    const total = stateTotal(cardState);
+    const meta = total + 'pt · ' + relativeTime(b.updatedAt)
+      + (isCurrent && isDirty() ? ' · unsaved' : '');
+
+    const body = el('div', { class: 'build-card-body' },
+      el('div', { class: 'build-card-row' },
+        el('span', { class: 'build-card-name' }, b.name),
+        el('span', { class: 'build-card-meta' }, meta),
+      ),
+      distBar(cardState),
+    );
+
+    const menuBtn = el('button', { class: 'build-card-menu', type: 'button', 'aria-label': 'Build options' });
+    menuBtn.append(icon('more-horizontal', 'build-card-menu-icon'));
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openCardMenu(b.id, menuBtn);
+    });
+
+    card.append(hit, iconTile, body, menuBtn);
+    return card;
+  }
+
+  function renderSheet() {
+    const others = builds.filter((b) => b.id !== currentId);
+
+    const head = el('div', { class: 'sheet-header' },
+      el('h2', { class: 'sheet-title' }, 'Your builds'),
+    );
+    const closeBtn = el('button', { class: 'sheet-close', type: 'button', 'aria-label': 'Close' });
+    closeBtn.append(icon('x', 'sheet-close-icon'));
+    closeBtn.addEventListener('click', closeSheet);
+    head.append(closeBtn);
+
+    const body = el('div', { class: 'sheet-body' });
+    body.append(el('div', { class: 'sheet-section-label' }, 'Current build'));
+    body.append(buildCard(currentBuild(), true));
+    body.append(el('div', { class: 'sheet-divider' }));
+    body.append(el('div', { class: 'sheet-section-label' }, 'Saved builds (' + others.length + ')'));
+    if (others.length) {
+      for (const b of others) body.append(buildCard(b, false));
+    } else {
+      body.append(el('p', { class: 'sheet-empty' }, 'No other builds yet — create one below.'));
+    }
+
+    const footer = el('div', { class: 'sheet-footer' });
+    const newBtn = el('button', { class: 'sheet-btn primary', type: 'button' });
+    newBtn.append(icon('plus', 'sheet-btn-icon'), el('span', {}, 'New build'));
+    newBtn.addEventListener('click', newBuild);
+    const saveAsBtn = el('button', { class: 'sheet-btn', type: 'button' });
+    saveAsBtn.append(icon('copy', 'sheet-btn-icon'), el('span', {}, 'Save current as…'));
+    saveAsBtn.addEventListener('click', saveAsNew);
+    const importBtn = el('button', { class: 'sheet-btn', type: 'button' });
+    importBtn.append(icon('share', 'sheet-btn-icon'), el('span', {}, 'Import from link'));
+    importBtn.addEventListener('click', importFromLink);
+    footer.append(newBtn, saveAsBtn, importBtn);
+
+    buildsSheet.replaceChildren(
+      el('div', { class: 'sheet-handle' }),
+      head, body, footer,
+    );
+  }
+
+  // Per-card options menu (rename / duplicate / delete)
+  let cardMenuEl = null;
+  let cardMenuFor = null;
+
+  function closeCardMenu() {
+    if (cardMenuEl) { cardMenuEl.remove(); cardMenuEl = null; }
+    cardMenuFor = null;
+  }
+
+  function openCardMenu(buildId, anchor) {
+    const sameButton = cardMenuFor === buildId;
+    closeCardMenu();
+    if (sameButton) return;
+    cardMenuFor = buildId;
+    const menu = el('div', { class: 'card-menu' });
+    const items = [
+      { label: 'Rename', fn: () => renameBuild(buildId) },
+      { label: 'Duplicate', fn: () => duplicateBuild(buildId) },
+      { label: 'Delete', danger: true, fn: () => deleteBuild(buildId) },
+    ];
+    for (const it of items) {
+      const b = el('button', { class: 'card-menu-item' + (it.danger ? ' danger' : ''), type: 'button' }, it.label);
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeCardMenu();
+        it.fn();
+      });
+      menu.append(b);
+    }
+    document.body.append(menu);
+    cardMenuEl = menu;
+    const r = anchor.getBoundingClientRect();
+    const left = Math.max(8, r.right - 160);
+    menu.style.left = left + 'px';
+    menu.style.top = (r.bottom + 4) + 'px';
   }
 
   const fmtNum = (n) => {
@@ -557,12 +913,35 @@
 
   // ----- Header buttons -----
 
-  // Give the header buttons an icon + a label span (so feedback text swaps cleanly).
   const shareBtn = document.getElementById('share-btn');
   const resetBtn = document.getElementById('reset-btn');
-  const shareLabel = el('span', {}, 'Share');
+  const shareLabel = el('span', { class: 'btn-label' }, 'Share');
+  saveBtn.replaceChildren(icon('save', 'btn-icon'), el('span', { class: 'btn-label' }, 'Save'));
   shareBtn.replaceChildren(icon('share', 'btn-icon'), shareLabel);
-  resetBtn.replaceChildren(icon('rotate-ccw', 'btn-icon'), el('span', {}, 'Reset'));
+  resetBtn.replaceChildren(icon('rotate-ccw', 'btn-icon'), el('span', { class: 'btn-label' }, 'Reset'));
+
+  saveBtn.addEventListener('click', saveCurrentBuild);
+
+  buildIdentityBtn.addEventListener('click', () => {
+    sheetOpen ? closeSheet() : openSheet();
+  });
+  sheetScrim.addEventListener('click', closeSheet);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (cardMenuEl) closeCardMenu();
+    else if (sheetOpen) closeSheet();
+  });
+
+  // Dismiss the per-card menu on any outside interaction.
+  document.addEventListener('click', (e) => {
+    if (cardMenuEl && !cardMenuEl.contains(e.target)) closeCardMenu();
+  });
+
+  window.addEventListener('resize', () => {
+    closeCardMenu();
+    if (sheetOpen) positionSheet();
+  });
 
   shareBtn.addEventListener('click', async () => {
     updateHash();
@@ -570,7 +949,6 @@
     try {
       await navigator.clipboard.writeText(url);
     } catch (e) {
-      // fallback: select+copy via temporary input
       const inp = document.createElement('input');
       inp.value = url;
       document.body.appendChild(inp);
@@ -588,24 +966,18 @@
 
   window.addEventListener('hashchange', () => {
     const next = loadFromHash();
-    if (!next) return;
+    if (!next || encodeState(next) === encodeState(state)) return;
     suppressHashUpdate = true;
-    for (const id of Object.keys(state)) {
-      Object.assign(state[id], next[id]);
-    }
+    state = next;
     suppressHashUpdate = false;
     saveState();
     render();
   });
 
-  document.getElementById('reset-btn').addEventListener('click', () => {
+  resetBtn.addEventListener('click', () => {
     if (totalSpent() === 0 && !ATTRIBUTES.some((a) => state[a.id].corruptedPoints > 0)) return;
-    if (!confirm('Reset all attribute points?')) return;
-    for (const id of Object.keys(state)) {
-      state[id].points = 0;
-      state[id].corruptedPoints = 0;
-      state[id].choices = {};
-    }
+    if (!confirm('Reset all attribute points in this build?')) return;
+    state = defaultState();
     saveState();
     render();
   });

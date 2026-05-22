@@ -10,6 +10,7 @@ const ATTRIBUTES = [
   {
     id: 'strength',
     icon: 'sword',
+    color: '#cf4b3a',
     name: 'Strength',
     blurb: 'Damage with strength-based weapons and carry weight.',
     perPoint: [
@@ -42,6 +43,7 @@ const ATTRIBUTES = [
   {
     id: 'agility',
     icon: 'wind',
+    color: '#7faa3e',
     name: 'Agility',
     blurb: 'Damage with agility-based weapons, post-dodge speed, and stamina.',
     perPoint: [
@@ -69,6 +71,7 @@ const ATTRIBUTES = [
   {
     id: 'vitality',
     icon: 'heart-pulse',
+    color: '#d9536b',
     name: 'Vitality',
     blurb: 'Maximum health pool.',
     perPoint: ['+10% of base health (+20 HP at 200 base)'],
@@ -97,6 +100,7 @@ const ATTRIBUTES = [
   {
     id: 'authority',
     icon: 'crown',
+    color: '#9466cc',
     name: 'Authority',
     blurb: 'Follower damage and concussive damage.',
     perPoint: [
@@ -128,6 +132,7 @@ const ATTRIBUTES = [
   {
     id: 'grit',
     icon: 'hand-fist',
+    color: '#4a8fc4',
     name: 'Grit',
     blurb: 'Stamina pool and armor.',
     perPoint: ['+3 stamina', '+8 armor'],
@@ -150,6 +155,7 @@ const ATTRIBUTES = [
   {
     id: 'expertise',
     icon: 'pickaxe',
+    color: '#3fa896',
     name: 'Expertise',
     blurb: 'Carry weight and harvesting efficiency.',
     perPoint: ['+15 max carry weight'],
