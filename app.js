@@ -120,19 +120,11 @@
     return idx == null ? null : tierData.choices[idx];
   }
 
-  // Each perk maps to:
-  //   apply({ stats, add, state }) — mutates stats. `add(stat, amount, source)` records a contribution.
-  //   effect({ state }) — returns a string for the Active Effects panel.
-  // Either or both may be defined.
+  // Perks that contribute to computed stats. `apply({ stats, add, state })` mutates
+  // stats via `add(stat, amount, source)`, which records a per-perk contribution.
+  // Perks not listed here are purely situational — their description is shown in
+  // the Perks section, with no number to fold into the stat cards.
   const PERK_REGISTRY = {
-    // Strength
-    'Heavy Blows':       { effect: () => 'Heavy & special attacks: +10% damage' },
-    'Combo Master':      { effect: () => 'Combo finishers: +20% damage' },
-    'Second Skin':       { effect: () => 'Equipped armor weighs 25% less' },
-    'Berserker':         { effect: () => 'Below 50% HP: +25% damage, +100 armor' },
-    'Blood-mad Berserker': { effect: () => 'Below 25% HP: no stagger/knockdown, +10% dmg, +50 armor' },
-    'Crushing Swings':   { effect: () => 'Heavy attacks: +25% stagger duration, no shield rebound' },
-    // Strength corrupted
     'Scourge': {
       apply: ({ add }) => {
         const c = state.strength.corruptedPoints;
@@ -140,28 +132,9 @@
         add('strDmg', c, 'Scourge');
         add('agiDmg', c, 'Scourge');
       },
-      effect: () => 'Scourge: +' + state.strength.corruptedPoints + '% damage (all weapons)',
     },
-    'Mule Kick': { effect: () => 'Kick knocks enemies back farther and knocks them down' },
-    'Wrack':     { effect: () => 'Strikes reduce enemy damage by 25% for 4s' },
-    'Desecrate': { effect: () => '5% chance on damage: corruption blast (50 dmg)' },
-
-    // Agility
-    'Backstab':         { effect: () => 'Attacks from behind: +15% damage' },
-    'Dead Shot':        { effect: () => 'Ranged: 2× projectile speed, +15% dmg to distant targets' },
-    'Precision Strike': { effect: () => 'Medium load or lighter: +10% armor penetration' },
-    'Quickfooted':      { effect: () => 'Move, climb, swim faster — less stamina cost' },
-    'Extended Leap':    { effect: () => 'Can double jump' },
-    'Rolling Thrust':   { effect: () => 'After dodge: +25% pen, next swing costs no stamina' },
-
-    // Vitality
     'Fierce Vitality': { apply: ({ add }) => add('regen', 0.5, 'Fierce Vitality') },
-    'Resurgence':      { effect: () => 'One-time heal when below 50% HP (refreshes after full)' },
-    'Fast Healer':     { effect: () => 'Healing effects: +50%' },
     'Robust':          { apply: ({ add }) => add('health', 100, 'Robust') },
-    'Last Stand':      { effect: () => 'Below 50% HP: 95% damage mitigation for 5s' },
-    'Glutton for Punishment': { effect: () => 'Regen last damage taken over 15s' },
-    // Vitality corrupted
     'Grotesque Excrescence': {
       apply: ({ add }) => {
         const c = state.vitality.corruptedPoints;
@@ -174,43 +147,15 @@
         if (c) add('deflectChance', 0.5 * c, 'Twisted Flesh');
       },
     },
-    'Petrified':     { effect: () => 'Immune to bleed, poison, disease, sunder' },
-    'Tainted Vessel': { effect: () => 'On damage taken: expel corruption (30 dmg AoE)' },
-
-    // Authority
-    'Irritate':            { effect: () => 'Followers goad enemies into attacking them' },
-    'Commanding Presence': { effect: () => 'Followers heal 5% of damage you deal' },
-    'Healthy Diet':        { effect: () => 'Followers regen +10 HP out of combat' },
-    'Attentive Care':      { effect: () => 'Followers: +50% healing received' },
-    'Well-Trained':        { effect: () => 'Followers gain +20 to all attributes' },
-    'War Party':           { effect: () => '+1 max follower (your stats no longer buff follower damage)' },
-    // Authority corrupted
     'Frenzy': {
       apply: ({ add }) => {
         const c = state.authority.corruptedPoints;
         if (c) add('frenzyFollowerDmg', 3 * c, 'Frenzy');
       },
-      effect: () => 'Frenzy: followers +' + (3 * state.authority.corruptedPoints) + '% damage for 10s after you damage',
     },
-    'Flesh Bond':  { effect: () => '33% of damage you take is also dealt to followers' },
-    'Devour':      { effect: () => 'Heal 2% of damage dealt by followers' },
-    'Demon-Lord':  { effect: () => '7% chance on damage: summon demon (22.5s)' },
-
-    // Grit
     'Tenacity':  { apply: ({ add }) => { add('armor', 40, 'Tenacity'); add('stamina', 20, 'Tenacity'); } },
     'Endurance': { apply: ({ add }) => add('staminaRegenPct', 25, 'Endurance') },
     'Stout':     { apply: ({ add, stats }) => add('armor', Math.floor(stats.stamina.value / 5), 'Stout') },
-    'Defensive Posture': { effect: () => 'Attacking/blocking: -15% incoming damage' },
-    'Shield Master':     { effect: () => 'Block unblockable attacks (higher stamina), 2× recovery after block' },
-    'Steel Thewed':      { effect: () => 'Cannot take more than 33% max HP per hit' },
-
-    // Expertise
-    'Survivalist':          { effect: () => 'Tools: ½ durability loss · hunger/thirst: -33%' },
-    'Efficient Harvest':    { effect: () => 'Final harvest hit: 2× resources' },
-    'Careful Harvest':      { effect: () => 'Rare resources: 2× chance' },
-    'Hard Worker':          { effect: () => 'Harvest nodes 2× faster' },
-    'Beast of Burden':      { effect: () => 'Over-encumbered: full speed, can dodge' },
-    'Structural Integrity': { effect: () => 'Structures: +25% stability' },
   };
 
   function makeStat() { return { value: 0, parts: [] }; }
@@ -230,7 +175,6 @@
       followerDmg: makeStat(),
       concussiveDmg: makeStat(),
     };
-    const effects = [];
 
     function add(stat, amount, source) {
       if (!stats[stat]) stats[stat] = makeStat();
@@ -264,24 +208,23 @@
     if (aut) add('followerDmg', 4 * aut, aut + ' Authority');
     if (aut) add('concussiveDmg', 6 * aut, aut + ' Authority');
 
-    // Apply each active perk in attribute / tier order
+    // Walk every active perk in attribute / tier order: collect it for the Perks
+    // section and apply its stat contribution if it has one.
     const activePerks = [];
     for (const a of ATTRIBUTES) {
       for (const T of PERK_TIERS) {
         const perk = activePerkAt(a.id, T);
         if (!perk) continue;
         const variant = a.corruptable && state[a.id].corruptedPoints >= T ? 'corrupted' : 'normal';
-        activePerks.push({ attrId: a.id, attrName: a.name, tier: T, name: perk.name, variant });
+        activePerks.push({
+          attrName: a.name, tier: T, name: perk.name, desc: perk.desc, variant,
+        });
         const handler = PERK_REGISTRY[perk.name];
-        if (!handler) continue;
-        if (handler.apply) handler.apply({ stats, add, state });
-        if (handler.effect) {
-          effects.push({ source: a.name + ' T' + T, text: handler.effect({ state }), variant });
-        }
+        if (handler && handler.apply) handler.apply({ stats, add, state });
       }
     }
 
-    return { stats, effects, activePerks };
+    return { stats, activePerks };
   }
 
   function tierVariant(attr, tier) {
@@ -380,22 +323,19 @@
     return sec;
   }
 
-  function effectCard(e) {
-    return el('div', { class: 'effect-card' + (e.variant === 'corrupted' ? ' corrupted' : '') },
-      el('div', { class: 'effect-source' }, e.source),
-      el('div', { class: 'effect-text' }, e.text),
-    );
-  }
-
-  function perkChip(p) {
-    return el('div', { class: 'perk-chip' + (p.variant === 'corrupted' ? ' corrupted' : '') },
-      el('span', { class: 'perk-chip-tier' }, 'T' + p.tier),
-      el('span', { class: 'perk-chip-name' }, p.name),
+  function perkCard(p) {
+    return el('div', { class: 'perk-summary' + (p.variant === 'corrupted' ? ' corrupted' : '') },
+      el('div', { class: 'perk-summary-head' },
+        el('span', { class: 'perk-summary-tier' }, 'T' + p.tier),
+        el('span', { class: 'perk-summary-attr' }, p.attrName),
+      ),
+      el('div', { class: 'perk-summary-name' }, p.name),
+      el('div', { class: 'perk-summary-desc' }, p.desc),
     );
   }
 
   function renderOverview() {
-    const { stats, effects, activePerks } = computeStats();
+    const { stats, activePerks } = computeStats();
     const v = (s) => stats[s].value;
     const nodes = [];
 
@@ -427,14 +367,9 @@
       statCard('hammer', 'Concussive Dmg', '+' + fmtNum(v('concussiveDmg')) + '%'),
     ]));
 
-    // Active Effects
-    if (effects.length) {
-      nodes.push(section('sparkles', 'Active Effects', 'effects-grid', effects.map(effectCard)));
-    }
-
-    // Unlocked Perks
+    // Perks — every perk you've picked, with its description
     if (activePerks.length) {
-      nodes.push(section(null, 'Unlocked Perks', 'perk-chips', activePerks.map(perkChip)));
+      nodes.push(section('sparkles', 'Perks', 'perks-grid', activePerks.map(perkCard)));
     }
 
     return nodes;

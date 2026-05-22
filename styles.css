@@ -184,9 +184,18 @@ body {
   .tab { flex: 0 0 auto; }
 }
 
+/* Below desktop: counter + Share + Reset share the row equally. */
+@media (max-width: 859px) {
+  .header-actions { display: contents; }
+  .header-right > .ap-counter,
+  .header-right .header-btn { flex: 1 1 0; min-width: 0; }
+  .ap-counter { justify-content: center; }
+  .header-btn { justify-content: center; }
+}
+
 @media (max-width: 480px) {
   .ap-counter .ap-label { display: none; }
-  .header-btn { padding: 8px 12px; }
+  .header-btn { padding: 8px 8px; }
 }
 
 /* ---------- Main / panels ---------- */
@@ -272,67 +281,64 @@ body {
   line-height: 1.3;
 }
 
-/* Active effects */
-.effects-grid {
+/* Perks */
+.perks-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 8px;
 }
 
-.effect-card {
+.perk-summary {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px;
-}
-
-.effect-card.corrupted { border-color: rgba(213, 115, 195, 0.4); }
-
-.effect-source {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin-bottom: 4px;
-}
-
-.effect-card.corrupted .effect-source { color: var(--corrupt); }
-
-.effect-text { font-size: 13px; color: var(--text-dim); line-height: 1.4; }
-
-/* Unlocked perk chips */
-.perk-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.perk-summary.corrupted { border-color: rgba(213, 115, 195, 0.4); }
+
+.perk-summary-head {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 
-.perk-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 6px 14px 6px 7px;
-}
-
-.perk-chip-tier {
+.perk-summary-tier {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.5px;
   color: var(--text-mute);
   background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 3px 7px;
+  padding: 2px 7px;
 }
 
-.perk-chip-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.perk-summary-attr {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-mute);
+}
 
-.perk-chip.corrupted { border-color: rgba(213, 115, 195, 0.45); }
-.perk-chip.corrupted .perk-chip-name,
-.perk-chip.corrupted .perk-chip-tier { color: var(--corrupt); }
+.perk-summary-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.perk-summary-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.perk-summary.corrupted .perk-summary-name { color: var(--corrupt); }
+.perk-summary.corrupted .perk-summary-tier { color: var(--corrupt); border-color: rgba(213, 115, 195, 0.4); }
 
 /* ---------- Attributes grid ---------- */
 
