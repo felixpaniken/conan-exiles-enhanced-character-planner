@@ -265,18 +265,23 @@
     if (aut) add('concussiveDmg', 6 * aut, aut + ' Authority');
 
     // Apply each active perk in attribute / tier order
+    const activePerks = [];
     for (const a of ATTRIBUTES) {
       for (const T of PERK_TIERS) {
         const perk = activePerkAt(a.id, T);
         if (!perk) continue;
+        const variant = a.corruptable && state[a.id].corruptedPoints >= T ? 'corrupted' : 'normal';
+        activePerks.push({ attrId: a.id, attrName: a.name, tier: T, name: perk.name, variant });
         const handler = PERK_REGISTRY[perk.name];
         if (!handler) continue;
         if (handler.apply) handler.apply({ stats, add, state });
-        if (handler.effect) effects.push({ source: a.name + ' T' + T, text: handler.effect({ state }) });
+        if (handler.effect) {
+          effects.push({ source: a.name + ' T' + T, text: handler.effect({ state }), variant });
+        }
       }
     }
 
-    return { stats, effects };
+    return { stats, effects, activePerks };
   }
 
   function tierVariant(attr, tier) {
@@ -294,13 +299,52 @@
   // ----- Rendering -----
 
   const grid = document.getElementById('attributes');
-  const statsPanel = document.getElementById('stats-panel');
+  const overviewPanel = document.getElementById('overview-panel');
+  const abilitiesPanel = document.getElementById('abilities-panel');
+  const tabBar = document.getElementById('tab-bar');
   const apSpentEl = document.getElementById('ap-spent');
   const apCounterEl = document.querySelector('.ap-counter');
 
+  const TABS = [
+    { id: 'overview', label: 'Overview', icon: 'user' },
+    { id: 'abilities', label: 'Abilities', icon: 'swords' },
+  ];
+  // Start on Overview when a build is already loaded (e.g. shared link); else Abilities.
+  let activeTab = totalSpent() > 0 ? 'overview' : 'abilities';
+
+  function renderTabs() {
+    tabBar.replaceChildren(...TABS.map((t) => {
+      const isActive = activeTab === t.id;
+      const btn = el('button', {
+        class: 'tab' + (isActive ? ' active' : ''),
+        type: 'button',
+        role: 'tab',
+        'aria-selected': isActive ? 'true' : 'false',
+      });
+      btn.append(icon(t.icon, 'tab-icon'), el('span', {}, t.label));
+      btn.addEventListener('click', () => setTab(t.id));
+      return btn;
+    }));
+  }
+
+  function applyTabVisibility() {
+    overviewPanel.hidden = activeTab !== 'overview';
+    abilitiesPanel.hidden = activeTab !== 'abilities';
+  }
+
+  function setTab(id) {
+    if (activeTab === id) return;
+    activeTab = id;
+    renderTabs();
+    applyTabVisibility();
+    window.scrollTo({ top: 0 });
+  }
+
   function render() {
+    renderTabs();
+    applyTabVisibility();
     grid.replaceChildren(...ATTRIBUTES.map(renderAttribute));
-    statsPanel.replaceChildren(...renderStats());
+    overviewPanel.replaceChildren(...renderOverview());
     apSpentEl.textContent = totalSpent();
     apCounterEl.classList.toggle('over', totalSpent() > MAX_AP);
   }
@@ -327,49 +371,73 @@
     return card;
   }
 
-  function renderStats() {
-    const { stats, effects } = computeStats();
-    const v = (s) => stats[s].value;
+  function section(iconName, title, gridClass, children) {
+    const sec = el('section', { class: 'ov-section' });
+    const head = el('h2', { class: 'section-head' });
+    if (iconName) head.append(icon(iconName, 'section-icon'));
+    head.append(el('span', {}, title));
+    sec.append(head, el('div', { class: gridClass }, ...children));
+    return sec;
+  }
 
-    const cards = [
+  function effectCard(e) {
+    return el('div', { class: 'effect-card' + (e.variant === 'corrupted' ? ' corrupted' : '') },
+      el('div', { class: 'effect-source' }, e.source),
+      el('div', { class: 'effect-text' }, e.text),
+    );
+  }
+
+  function perkChip(p) {
+    return el('div', { class: 'perk-chip' + (p.variant === 'corrupted' ? ' corrupted' : '') },
+      el('span', { class: 'perk-chip-tier' }, 'T' + p.tier),
+      el('span', { class: 'perk-chip-name' }, p.name),
+    );
+  }
+
+  function renderOverview() {
+    const { stats, effects, activePerks } = computeStats();
+    const v = (s) => stats[s].value;
+    const nodes = [];
+
+    if (totalSpent() === 0) {
+      nodes.push(el('p', { class: 'overview-hint' },
+        'No points allocated yet — open the Abilities tab to build your character.'));
+    }
+
+    // Core Stats
+    const core = [
       statCard('heart', 'Health', fmtNum(v('health')),
         [perkPartsDetail(stats.health), v('regen') > 0 ? '+' + fmtNum(v('regen')) + ' regen/s' : null].filter(Boolean).join(' · ') || null),
       statCard('zap', 'Stamina', fmtNum(v('stamina')),
         [perkPartsDetail(stats.stamina), v('staminaRegenPct') > 0 ? '+' + fmtNum(v('staminaRegenPct')) + '% regen' : null].filter(Boolean).join(' · ') || null),
       statCard('shield', 'Armor', fmtNum(v('armor')), perkPartsDetail(stats.armor)),
       statCard('weight', 'Carry Weight', fmtNum(v('carry')), perkPartsDetail(stats.carry)),
+    ];
+    if (v('deflectChance') > 0) {
+      core.push(statCard('shield-check', 'Deflect Chance', fmtNum(v('deflectChance')) + '%', perkPartsDetail(stats.deflectChance)));
+    }
+    nodes.push(section(null, 'Core Stats', 'stats-grid', core));
+
+    // Combat
+    nodes.push(section(null, 'Combat', 'stats-grid', [
       statCard('sword', 'Str Weapon Dmg', '+' + fmtNum(v('strDmg')) + '%', perkPartsDetail(stats.strDmg)),
       statCard('swords', 'Agi Weapon Dmg', '+' + fmtNum(v('agiDmg')) + '%', perkPartsDetail(stats.agiDmg)),
       statCard('users', 'Follower Dmg', '+' + fmtNum(v('followerDmg')) + '%',
         v('frenzyFollowerDmg') > 0 ? '+' + fmtNum(v('frenzyFollowerDmg')) + '% Frenzy (in combat)' : null),
       statCard('hammer', 'Concussive Dmg', '+' + fmtNum(v('concussiveDmg')) + '%'),
-    ];
+    ]));
 
-    if (v('deflectChance') > 0) {
-      cards.push(statCard('shield-check', 'Deflect Chance', fmtNum(v('deflectChance')) + '%', perkPartsDetail(stats.deflectChance)));
+    // Active Effects
+    if (effects.length) {
+      nodes.push(section('sparkles', 'Active Effects', 'effects-grid', effects.map(effectCard)));
     }
 
-    const result = [...cards];
-    if (effects.length) result.push(renderEffectsPanel(effects));
-    return result;
-  }
-
-  function renderEffectsPanel(effects) {
-    const panel = el('div', { class: 'effects-card' });
-    const head = el('div', { class: 'stat-label' });
-    head.append(icon('sparkles', 'stat-icon'), el('span', {}, 'Active Effects'));
-    panel.append(head);
-    const ul = el('ul', { class: 'effects-list' });
-    for (const e of effects) {
-      const li = el('li', { class: 'effects-item' });
-      li.append(
-        el('span', { class: 'effects-source' }, e.source),
-        el('span', { class: 'effects-text' }, e.text),
-      );
-      ul.append(li);
+    // Unlocked Perks
+    if (activePerks.length) {
+      nodes.push(section(null, 'Unlocked Perks', 'perk-chips', activePerks.map(perkChip)));
     }
-    panel.append(ul);
-    return panel;
+
+    return nodes;
   }
 
   function renderAttribute(attr) {
@@ -552,9 +620,15 @@
     return node;
   }
 
-  // ----- Reset -----
+  // ----- Header buttons -----
 
+  // Give the header buttons an icon + a label span (so feedback text swaps cleanly).
   const shareBtn = document.getElementById('share-btn');
+  const resetBtn = document.getElementById('reset-btn');
+  const shareLabel = el('span', {}, 'Share');
+  shareBtn.replaceChildren(icon('share', 'btn-icon'), shareLabel);
+  resetBtn.replaceChildren(icon('rotate-ccw', 'btn-icon'), el('span', {}, 'Reset'));
+
   shareBtn.addEventListener('click', async () => {
     updateHash();
     const url = location.href;
@@ -569,11 +643,10 @@
       try { document.execCommand('copy'); } catch (_) {}
       document.body.removeChild(inp);
     }
-    const original = shareBtn.textContent;
-    shareBtn.textContent = 'Copied!';
+    shareLabel.textContent = 'Copied!';
     shareBtn.classList.add('copied');
     setTimeout(() => {
-      shareBtn.textContent = original;
+      shareLabel.textContent = 'Share';
       shareBtn.classList.remove('copied');
     }, 1500);
   });
