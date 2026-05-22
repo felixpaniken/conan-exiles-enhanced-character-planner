@@ -11,11 +11,10 @@
   --text-mute: #7a6750;
   --accent: #d49a45;
   --accent-2: #b06a2c;
-  --danger: #8a3a2a;
-  --good: #6f8a3a;
+  --danger: #e0664f;
   --corrupt: #d573c3;
   --corrupt-glow: rgba(213, 115, 195, 0.35);
-  --locked: #443628;
+  --corrupt-border: rgba(213, 115, 195, 0.4);
   --radius: 10px;
   --tap: 44px;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
@@ -523,7 +522,7 @@ body.sheet-locked { overflow: hidden; }
   cursor: pointer;
 }
 .card-menu-item:active { background: var(--bg); }
-.card-menu-item.danger { color: #e0664f; }
+.card-menu-item.danger { color: var(--danger); }
 
 /* ---------- Main / panels ---------- */
 
@@ -625,7 +624,7 @@ body.sheet-locked { overflow: hidden; }
   gap: 4px;
 }
 
-.perk-summary.corrupted { border-color: rgba(213, 115, 195, 0.4); }
+.perk-summary.corrupted { border-color: var(--corrupt-border); }
 
 .perk-summary-head {
   display: flex;
@@ -665,7 +664,7 @@ body.sheet-locked { overflow: hidden; }
 }
 
 .perk-summary.corrupted .perk-summary-name { color: var(--corrupt); }
-.perk-summary.corrupted .perk-summary-tier { color: var(--corrupt); border-color: rgba(213, 115, 195, 0.4); }
+.perk-summary.corrupted .perk-summary-tier { color: var(--corrupt); border-color: var(--corrupt-border); }
 
 /* ---------- Attributes grid ---------- */
 
@@ -742,27 +741,6 @@ body.sheet-locked { overflow: hidden; }
 .attr-card.corrupted .attr-name { color: var(--corrupt); }
 
 .attr-blurb { font-size: 13px; color: var(--text-dim); }
-
-/* Corruption toggle */
-.corrupt-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  padding: 4px 8px 4px 4px;
-  font-size: 12px;
-  color: var(--text-dim);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  min-height: 32px;
-  white-space: nowrap;
-}
-
-.corrupt-toggle input { margin: 0; width: 16px; height: 16px; accent-color: var(--corrupt); }
-
-.attr-card.corrupted .corrupt-toggle { color: var(--corrupt); border-color: var(--corrupt); }
 
 /* Corrupted stepper */
 .corrupt-stepper {
@@ -850,6 +828,13 @@ body.sheet-locked { overflow: hidden; }
 .step-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+.step-value-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
 }
 
 .step-value {
@@ -967,7 +952,7 @@ body.sheet-locked { overflow: hidden; }
   border-style: dashed;
 }
 
-.perk.corrupted-perk { border-color: rgba(213, 115, 195, 0.4); }
+.perk.corrupted-perk { border-color: var(--corrupt-border); }
 .perk.corrupted-perk .perk-name { color: var(--corrupt); }
 
 .perk.corrupted-perk.active {
@@ -976,13 +961,6 @@ body.sheet-locked { overflow: hidden; }
 }
 
 .perk-tier.corrupted .perk-tier-label { color: var(--corrupt); }
-
-.step-value-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 1;
-}
 
 /* ---------- Footer ---------- */
 

@@ -10,16 +10,19 @@
     stamina: 100,
     carryWeight: 70,
     armor: 0,
-    healthRegen: 0,
   };
+
+  // Viewport width (px) at which the layout switches to its desktop form.
+  const DESKTOP_MIN_WIDTH = 860;
 
   // ----- State -----
   // A build: { id, name, state, updatedAt }
   // state: { [attrId]: { points, corruptedPoints, choices: { [tier]: index } } }
+  // Edits auto-save into the current build, so `state` and the current build's
+  // state are always kept in sync.
   let builds = [];
   let currentId = null;
-  let state;                  // live working state — may differ from the saved build (dirty)
-  let suppressHashUpdate = false;
+  let state;
 
   function defaultState() {
     const s = {};
@@ -88,7 +91,6 @@
   }
 
   function updateHash() {
-    if (suppressHashUpdate) return;
     const encoded = encodeState(state);
     if (encoded === location.hash.replace(/^#/, '')) return;
     history.replaceState(null, '', '#' + encoded);
@@ -273,19 +275,34 @@
     return best;
   }
 
-  // ----- Stats computation -----
+  // ----- Perk resolution -----
 
-  function activePerkAt(attrId, tier) {
-    const s = state[attrId];
+  // Which perk variant applies at a tier: corrupted once enough corrupted points
+  // reach it, otherwise normal.
+  function tierVariant(attr, tier) {
+    const s = state[attr.id];
+    return attr.corruptable && s.corruptedPoints >= tier ? 'corrupted' : 'normal';
+  }
+
+  // The perk-tier data ({ tier, choices }) shown at a tier, with its variant.
+  function perkAtTier(attr, tier) {
+    const variant = tierVariant(attr, tier);
+    return { variant, tierData: attr.perks[variant].find((t) => t.tier === tier) };
+  }
+
+  // The single perk active at a tier — resolving the player's choice on
+  // multi-option tiers — or null if the tier is locked or not yet chosen.
+  function activePerkAt(attr, tier) {
+    const s = state[attr.id];
     if (s.points < tier) return null;
-    const attr = ATTRIBUTES.find((a) => a.id === attrId);
-    const variant = attr.corruptable && s.corruptedPoints >= tier ? 'corrupted' : 'normal';
-    const tierData = attr.perks[variant].find((t) => t.tier === tier);
+    const { tierData } = perkAtTier(attr, tier);
     if (!tierData) return null;
     if (tierData.choices.length === 1) return tierData.choices[0];
     const idx = s.choices[tier];
     return idx == null ? null : tierData.choices[idx];
   }
+
+  // ----- Stats computation -----
 
   // Perks that contribute to computed stats. `apply({ stats, add, state })` mutates
   // stats via `add(stat, amount, source)`, which records a per-perk contribution.
@@ -343,10 +360,13 @@
       concussiveDmg: makeStat(),
     };
 
+    // Contributions added while `inPerkPhase` is true are flagged as perk-sourced,
+    // so the overview can list them separately from plain per-attribute scaling.
+    let inPerkPhase = false;
     function add(stat, amount, source) {
       if (!stats[stat]) stats[stat] = makeStat();
       stats[stat].value += amount;
-      if (amount && source) stats[stat].parts.push({ amount, source });
+      if (amount && source) stats[stat].parts.push({ amount, source, isPerk: inPerkPhase });
     }
 
     // Base values
@@ -378,13 +398,14 @@
     // Walk every active perk in attribute / tier order: collect it for the Perks
     // section and apply its stat contribution if it has one.
     const activePerks = [];
+    inPerkPhase = true;
     for (const a of ATTRIBUTES) {
       for (const T of PERK_TIERS) {
-        const perk = activePerkAt(a.id, T);
+        const perk = activePerkAt(a, T);
         if (!perk) continue;
-        const variant = a.corruptable && state[a.id].corruptedPoints >= T ? 'corrupted' : 'normal';
         activePerks.push({
-          attrName: a.name, tier: T, name: perk.name, desc: perk.desc, variant,
+          attrName: a.name, tier: T, name: perk.name, desc: perk.desc,
+          variant: tierVariant(a, T),
         });
         const handler = PERK_REGISTRY[perk.name];
         if (handler && handler.apply) handler.apply({ stats, add, state });
@@ -392,18 +413,6 @@
     }
 
     return { stats, activePerks };
-  }
-
-  function tierVariant(attr, tier) {
-    const s = state[attr.id];
-    if (attr.corruptable && s.corruptedPoints >= tier) return 'corrupted';
-    return 'normal';
-  }
-
-  function perkAtTier(attr, tier) {
-    const variant = tierVariant(attr, tier);
-    const list = attr.perks[variant];
-    return { variant, tier: list.find((t) => t.tier === tier) };
   }
 
   // ----- Rendering -----
@@ -496,7 +505,7 @@
 
   function positionSheet() {
     // Desktop: popover anchored under the build identity. Mobile: CSS bottom sheet.
-    if (window.innerWidth >= 860) {
+    if (window.innerWidth >= DESKTOP_MIN_WIDTH) {
       const r = buildIdentityBtn.getBoundingClientRect();
       buildsSheet.style.top = (r.bottom + 8) + 'px';
       buildsSheet.style.left = r.left + 'px';
@@ -630,14 +639,15 @@
     menu.style.top = (r.bottom + 4) + 'px';
   }
 
-  const fmtNum = (n) => {
+  function fmtNum(n) {
     const r = Math.round(n * 10) / 10;
     return Number.isInteger(r) ? String(r) : r.toFixed(1);
-  };
+  }
 
-  // Highlight only perk-sourced parts (skip per-attribute scaling, which is obvious).
+  // The perk-sourced contributions to a stat, formatted for the stat-card detail
+  // line. Plain per-attribute scaling is omitted — it is obvious from the points.
   function perkPartsDetail(stat) {
-    const perkParts = stat.parts.filter((p) => !/\d+\s+(Strength|Agility|Vitality|Authority|Grit|Expertise)/.test(p.source));
+    const perkParts = stat.parts.filter((p) => p.isPerk);
     if (!perkParts.length) return null;
     return perkParts.map((p) => (p.amount >= 0 ? '+' : '') + fmtNum(p.amount) + ' ' + p.source).join(' · ');
   }
@@ -825,10 +835,10 @@
     const s = state[attr.id];
 
     for (const T of PERK_TIERS) {
-      const { variant, tier } = perkAtTier(attr, T);
-      if (!tier) continue;
+      const { variant, tierData } = perkAtTier(attr, T);
+      if (!tierData) continue;
       const unlocked = s.points >= T;
-      const isChoice = tier.choices.length > 1;
+      const isChoice = tierData.choices.length > 1;
       const chosenIdx = s.choices[T];
 
       const tierEl = el('div', { class: 'perk-tier' + (unlocked ? ' unlocked' : '') + (variant === 'corrupted' ? ' corrupted' : '') });
@@ -840,7 +850,7 @@
 
       const opts = el('div', { class: 'perk-options' + (isChoice ? ' has-choice' : '') });
 
-      tier.choices.forEach((p, idx) => {
+      tierData.choices.forEach((p, idx) => {
         const btn = el('button', { class: 'perk', type: 'button' });
         const classes = ['perk'];
         if (variant === 'corrupted') classes.push('corrupted-perk');
@@ -902,7 +912,8 @@
   resetBtn.replaceChildren(icon('rotate-ccw', 'btn-icon'), el('span', { class: 'btn-label' }, 'Reset'));
 
   buildIdentityBtn.addEventListener('click', () => {
-    sheetOpen ? closeSheet() : openSheet();
+    if (sheetOpen) closeSheet();
+    else openSheet();
   });
   sheetScrim.addEventListener('click', closeSheet);
 
